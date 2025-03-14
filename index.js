@@ -1,100 +1,129 @@
 const express = require("express");
-const app = express();
-const jsonweb = require("jsonwebtoken");
-const JWT_Secret = "AyushBhaiiii";
-const {UserModel, TodoModel} = require("./db");
-const  mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
+const { UserModel, TodoModel } = require("./db");
+const { auth, JWT_SECRET } = require("./auth");
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+const { z } = require("zod");
+
+
 
 mongoose.connect("your mongodb url/your folder name in which you want to stote data in database")
 
+const app = express();
 app.use(express.json());
 
-app.post('/signup', async function(req, res){
+app.post("/signup", async function(req, res) {
+    const requireBody = z.object({
+        email: z.string().min(4).max(20).email(),
+        name : z.string().min(4).max(20),
+        password:z.string().min(4).max(20)
+    })
+
+    const parseddatasuccess = requireBody.safeParse(req.body);
+
+    if(!parseddatasuccess.success){
+        res.json({
+            msg : "Incorrect format"
+        })
+        return 
+    }
+
+   
     const email = req.body.email;
-    const password= req.body.pasword;
+    const password = req.body.password;
     const name = req.body.name;
+
+    let errorthrown = false ;
+
+    try{
+    const hasedpassword = await bcrypt.hash(password, 5);
+    console.log(hasedpassword);
+
 
     await UserModel.create({
         email: email,
-        password: password,
+        password:hasedpassword ,
         name: name
-    })
+    });
+    
+   } catch(e){
+        res.json({
+             message: "User already Exist"
+        })
+        errorthrown = true;
+   }
+
+   if(!errorthrown){
     res.json({
-        msg: "you are signed up"
+        message: "You are signed up"
     })
+   }
+   
 });
 
-app.post('/signin', auth, async function(req, res){
+
+app.post("/signin", async function(req, res) {
     const email = req.body.email;
-    const password= req.body.pasword;
+    const password = req.body.password;
 
-    const user = await UserModel.findOne({
-        email: email,
-        password: password
-    })
+    const response = await UserModel.findOne({
+        email: email
+        
+    });
 
-    console.log(user);
-
-    if(user){
-        console.log({
-            id: user._id.toString()
-        })
-        const token = jsonweb.sign({
-            id: user._id.toString()
-        },JWT_Secret);
-        res.json({
-            token: token
-        });
-    }
-    else{
+    if(!response){
         res.status(403).json({
-            msg: "Invalid Credentials"
+            msg : "User doesnt exist"
+        })
+        return
+    }
+
+    const passwordmatch = await bcrypt.compare(password, response.password);
+
+    if (passwordmatch) {
+        const token = jwt.sign({
+            id: response._id.toString()
+        }, JWT_SECRET);
+
+        res.json({
+            token
+        })
+    } else {
+        res.status(403).json({
+            message: "Incorrect creds"
         })
     }
-})
+});
 
-app.post('/todo', auth,  async function(req, res){
-    const userid = req.userid;
-    const tittle = req.tittle;
-    const done = req.done;
-    
+
+app.post("/todo", auth, async function(req, res) {
+    const userId = req.userId;
+    const title = req.body.title;
+    const done = req.body.done;
+
     await TodoModel.create({
-        userid,
-         tittle,
-         done
+        userId,
+        title,
+        done
     });
 
     res.json({
-        msg : "Todo created"
+        message: "Todo created"
     })
-})
+});
 
 
-app.get('/todos', auth, async function(req, res){
-    const userid = req.userid;
+app.get("/todos", auth, async function(req, res) {
+    const userId = req.userId;
+
     const todos = await TodoModel.find({
-        userid
-    })
+        userId
+    });
+
     res.json({
-      todos
+        todos
     })
-})
-
-function auth(req, res, next){
-    const token = req.headers.token;
-
-    const decodeuser = jsonweb.verify(token, JWT_Secret);
-    if(decodeuser){
-        req.userid = decodeuser.id;
-        next();
-    }
-    else{
-        res.status(403).json({
-            msg : "Invalid crediantials"
-        })
-    }
-}
-
-
+});
 
 app.listen(3000);
